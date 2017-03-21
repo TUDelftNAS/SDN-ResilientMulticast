@@ -40,6 +40,7 @@ class MulticastController(app_manager.RyuApp):
         self.span_tree = None
         self.builder = PerLinkTreeBuilder.PerLinkTreeBuilder(3, self, SPT_join) #F,.,join function
         self.groups = {} #ip_group -> [ip_sources]
+        self.subscribers = {} #ip_group -> subscriber -> [MODE (include = True, exclude = False) ip_sources]
 
         self.ip_2_mac = {}
 
@@ -878,6 +879,27 @@ class MulticastController(app_manager.RyuApp):
         else:
             return
 
+    def send_packet(self, host, msg):
+        """Send msg to host"""
+
+        if host not in self.network:
+            return
+
+        switch_id = list(self.network.predecessors(host))[0]
+
+        dp = self.network.node[switch_id]['switch'].dp
+        ofp = dp.ofproto
+        parser = dp.ofproto_parser
+
+        port = self.network[switch_id][host]['src_port']
+
+        actions = [parser.OFPActionOutput(port)]
+
+        cmd = parser.OFPPacketOut(datapath=dp, buffer_id=ofp.OFP_NO_BUFFER, 
+                in_port=ofp.OFPP_CONTROLLER, actions=actions, data=msg.data)
+
+        dp.send_msg(cmd)
+
     def processIPMulticast(self,dp,msg,pkt):
         self.log('IPV4 Multicast Message')
         eth = pkt[0]
@@ -916,6 +938,23 @@ class MulticastController(app_manager.RyuApp):
                 datapath=dp, priority=self.LOWPRIO, match=match, instructions=instr)
             dp.send_msg(cmd)
 
+            #Add existing subscribers to new group
+            subscribers = self.subscribers.get(ip.dst, {})
+            for subscriber in it.ifilter(lambda eth_src: eth_src != eth.src, subscribers):
+                sub_info = subscribers[subscriber]
+
+                #INCLUDE mode
+                if sub_info[0]:
+                    add = ip.src in sub_info[1]
+                        
+                #EXCLUDE mode
+                else:
+                    add = ip.src not in sub_info[1]
+
+                if add:                    
+                    self.builder.add_subscriber(ip.dst, ip.src, subscriber)
+                    self.send_packet(subscriber, msg)
+
     #TODO: Support all types of IGMPV3 messages,
     #instead of just INCLUDE and EXCLUDE messages
     def processIGMP(self, eth_src, ip_src, igmp_msg):
@@ -924,23 +963,33 @@ class MulticastController(app_manager.RyuApp):
             records = igmp_msg.records
             for record in records:
                 address = record.address
-                self.log('Record change for group ' + address)
-                if address in self.groups:
-                    group = self.groups[address]
-                    if record.type_ == igmp.CHANGE_TO_INCLUDE_MODE:
-                        for src_ip in it.ifilter(lambda ip: ip != ip_src, group):
-                            if src_ip in record.srcs:
-                                self.builder.add_subscriber(address, src_ip, eth_src)
-                            else:                       
-                                self.builder.remove_subscriber(address, src_ip, eth_src)
-                    elif record.type_ == igmp.CHANGE_TO_EXCLUDE_MODE:
-                        for src_ip in it.ifilter(lambda ip: ip != ip_src, group):
-                            if src_ip in record.srcs:
-                                self.builder.remove_subscriber(address, src_ip, eth_src)
-                            else:                       
-                                self.builder.add_subscriber(address, src_ip, eth_src)
-                else:
-                    self.log('Group does not exit (yet)')
+
+                if record.type_ == igmp.CHANGE_TO_INCLUDE_MODE or record.type_ == igmp.CHANGE_TO_EXCLUDE_MODE:
+
+                    mode = record.type_ == igmp.CHANGE_TO_INCLUDE_MODE
+
+                    self.log('Record change for group ' + address)
+
+                    if address not in self.subscribers:
+                        self.subscribers[address] = {}
+
+                    subscribers = self.subscribers[address]
+                    subscribers[eth_src] = [mode, record.srcs]                                
+
+                    if address in self.groups:
+                        group = self.groups[address]
+                        if mode:
+                            for src_ip in it.ifilter(lambda ip: ip != ip_src, group):
+                                if src_ip in record.srcs:
+                                    self.builder.add_subscriber(address, src_ip, eth_src)
+                                else:                       
+                                    self.builder.remove_subscriber(address, src_ip, eth_src)
+                        else:
+                            for src_ip in it.ifilter(lambda ip: ip != ip_src, group):
+                                if src_ip in record.srcs:
+                                    self.builder.remove_subscriber(address, src_ip, eth_src)
+                                else:                       
+                                    self.builder.add_subscriber(address, src_ip, eth_src)
                     
 
         else:
