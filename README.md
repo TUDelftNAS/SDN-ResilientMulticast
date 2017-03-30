@@ -5,12 +5,12 @@ At the moment only IPv4 multicast is supported.
 
 Hosts can join or leave a multicast group by sending an IGMPv3 INCLUDE or EXCLUDE packet to a switch in the network. These packets automatically get taken out of the network and processed by the controller application. At the moment no other IGMPv3 messages are supported.
 
-##Requirements
+## Requirements
 SDN-ResilientMulticast relies on both [Ryu](https://github.com/osrg/ryu) and [NetworkX](https://github.com/networkx/networkx).
 
 [SPT](SPT.py) and [DST](DST.py) will only work properly with the development version of NetworkX, as they both make use of the weight function functionality when computing shortest paths.
 
-##Modules
+## Modules
 The functionality of the application is divided over 3 types of modules:
 
 * [MulticastController](MulticastController.py) is the main module. It is the interface between the application and the network. Installs flows, adds and removes hosts to and from groups, etc.
@@ -29,19 +29,19 @@ To change the basic functionality of the application the amount of fault toleran
 
 Where PerLinkTreeBuilder can be changed to switch TreeBuilders, 3 can be replaced by any integer and SPT_join can be replaced with any other join function.
 
-##Usage
+## Usage
 The application can be started by passing [MulticastController](MulticastController.py) as an argument to ryu-manager with topology discovery enabled:
 
 ```PYTHONPATH=. ./bin/ryu-manager repository_location/SDN-ResilientMulticast/MulticastController.py --observe-links```
 
 For more information on Ryu, visit the [Ryu resources list](http://osrg.github.io/ryu/resources.html).
 
-###Fault Tolerance
+### Fault Tolerance
 By default the application is setup to recover from up to 3 link failures. This requires a lot of resources in the form of flow entries and group tables. To change this number replace the 3 in the following line of [MulticastController](MulticastController.py)
 
 ```self.builder = PerLinkTreeBuilder.PerLinkTreeBuilder(3, self, SPT_join) #F,.,join function```
 
 by the required number of edge fault tolerance.
 
-##License
+## License
 [GPL-3](LICENSE)
